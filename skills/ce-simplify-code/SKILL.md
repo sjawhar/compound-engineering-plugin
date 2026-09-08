@@ -33,7 +33,7 @@ Do not paraphrase these rubrics from memory — read each file and pass it verba
 
 **Bounded dispatch.** Queue the three reviewers and launch only as many as the harness accepts at once; treat a concurrency/active-agent-limit error as backpressure (leave the reviewer queued and retry after a slot frees), not as reviewer failure. If a dispatch fails for a reason that survives correcting the invocation, run that reviewer's pass inline in the parent context using the same prompt asset, and disclose the substitution in one line.
 
-**Model selection.** Use the platform's balanced mid-tier model for these reviewers when the current harness exposes a known override. In Claude Code this is the Sonnet class. In Codex, apply this tier only when the active dispatch primitive exposes an explicit model or custom-agent selector; task wording alone does not select a different model. Otherwise omit the override and inherit the parent model -- a working pass on the parent model beats a broken dispatch.
+**Model selection.** Dispatch these reviewers on a top-tier reasoning model at its highest effort — never a mid-tier or cheaper class. The persona rubrics are gated ("preserve exact behavior", "not worth flagging when…"); a weaker model returns plausible findings that fail the gate, and those are the behavior-changing "simplifications" this skill exists to prevent. Prefer a non-Anthropic provider so the pass is also a cross-model review of Claude-authored code. In oh-my-pi, dispatch each persona as the `astra` agent, falling back to the bundled `reviewer` agent; never the generic or scout-class agents, whose roles resolve to a mid-tier model. In Codex, apply this only when the active dispatch primitive exposes an explicit model or custom-agent selector; task wording alone does not select a different model. Where no non-Anthropic route exists (Claude Code), use the strongest Anthropic tier the harness exposes — the Opus class, never Sonnet. If the harness exposes no per-agent model selection at all, omit the override and inherit the parent model -- a working pass on the parent model beats a broken dispatch.
 
 **Permission mode.** Omit the `mode` parameter on the dispatch call so the user's configured permission settings apply.
 
@@ -61,4 +61,4 @@ If no test suite, lint, or typecheck is configured, state that explicitly in the
 
 ## Step 5: Summarize
 
-Summarize what was already sound and what improved. Report applied counts by reuse, quality, and efficiency; skipped count; and check outcomes. If nothing changed, say so. Do not use net lines removed as the success metric.
+Summarize what was already sound and what improved. Report applied counts by reuse, quality, and efficiency; skipped count; and check outcomes. Name the agent (or model) that produced each reviewer's findings, so the reader can see which model reviewed. If nothing changed, say so. Do not use net lines removed as the success metric.
