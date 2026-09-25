@@ -2949,6 +2949,77 @@ print(json.dumps({
     expect(chain.manager_status).toBe("probe-error")
   })
 
+  test("an INSUFFICIENT_SCOPES refusal confined to the stack fields falls back to the default branch like a schema-unavailable stack, with no stack_blocker", () => {
+    // Captured verbatim from `gh api graphql` against METR/hawk#1924 with a public_repo-scoped
+    // token (GH_PUBLIC_REPO_PAT): every refusal names a field inside the stackEntry/stack
+    // selection (lines 6-10 of _fetch_graphql_stack's query), never gh's schema-unavailable
+    // wording that _stack_schema_unavailable already recognizes.
+    const scopesBody = {
+      errors: [
+        { type: "INSUFFICIENT_SCOPES", locations: [{ line: 6, column: 17 }],
+          message: "Your token has not been granted the required scopes to execute this query. The 'position' field requires one of the following scopes: ['repo'], but your token has only been granted the: ['public_repo'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens." },
+        { type: "INSUFFICIENT_SCOPES", locations: [{ line: 7, column: 12 }],
+          message: "Your token has not been granted the required scopes to execute this query. The 'id' field requires one of the following scopes: ['repo'], but your token has only been granted the: ['public_repo'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens." },
+        { type: "INSUFFICIENT_SCOPES", locations: [{ line: 7, column: 15 }],
+          message: "Your token has not been granted the required scopes to execute this query. The 'number' field requires one of the following scopes: ['repo'], but your token has only been granted the: ['public_repo'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens." },
+        { type: "INSUFFICIENT_SCOPES", locations: [{ line: 7, column: 22 }],
+          message: "Your token has not been granted the required scopes to execute this query. The 'size' field requires one of the following scopes: ['repo'], but your token has only been granted the: ['public_repo'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens." },
+        { type: "INSUFFICIENT_SCOPES", locations: [{ line: 7, column: 27 }],
+          message: "Your token has not been granted the required scopes to execute this query. The 'baseRefName' field requires one of the following scopes: ['repo'], but your token has only been granted the: ['public_repo'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens." },
+        { type: "INSUFFICIENT_SCOPES", locations: [{ line: 8, column: 34 }],
+          message: "Your token has not been granted the required scopes to execute this query. The 'position' field requires one of the following scopes: ['repo'], but your token has only been granted the: ['public_repo'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens." },
+      ],
+    }
+    const { chain, calls } = probeChain({
+      baseRef: "parent",
+      headRef: "feature",
+      stackView: { status: 1, stderr: "no current stack" },
+      graphql: {
+        status: 1,
+        stdout: scopesBody,
+        // gh's human-readable stderr restatement never carries the schema-unavailable wording
+        // _stack_schema_unavailable looks for, so a pass here proves the new stdout-based path
+        // -- not the pre-existing stderr fallback -- is what classified this response.
+        stderr: "gh: Your token has not been granted the required scopes to execute this query. The 'position' field requires one of the following scopes: ['repo'], but your token has only been granted the: ['public_repo'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens.",
+      },
+      defaultBranch: { status: 0, stdout: "main\n" },
+      openPrs: [
+        { number: 41, url: "https://github.com/o/r/pull/41", state: "OPEN", baseRefName: "main", headRefName: "parent" },
+        { number: 43, url: "https://github.com/o/r/pull/43", state: "OPEN", baseRefName: "feature", headRefName: "child" },
+      ],
+    })
+    expect(calls).toContain("gh api repos/o/r --jq .default_branch")
+    expect(chain.manager_status).toBe("absent")
+    expect(chain.relationship_status).toBe("dependent")
+    expect(chain.parent_prs.map((pr) => pr.number)).toEqual([41])
+    expect(chain.dependent_prs.map((pr) => pr.number)).toEqual([43])
+
+    const blocker = spawnSync("python3", ["-c", `
+import json
+from importlib.machinery import SourceFileLoader
+m = SourceFileLoader("prs_stack_blocker", ${JSON.stringify(SCRIPT)}).load_module()
+chain = json.loads(${JSON.stringify(JSON.stringify(chain))})
+print(json.dumps(m._stack_blocker(chain)))
+`], { encoding: "utf8" })
+    expect(blocker.status, blocker.stderr).toBe(0)
+    expect(JSON.parse(blocker.stdout.trim())).toBeNull()
+  })
+
+  test("an INSUFFICIENT_SCOPES refusal on a field outside the stack selection stays a probe error", () => {
+    const nonStackScopesBody = {
+      errors: [
+        { type: "INSUFFICIENT_SCOPES", locations: [{ line: 4, column: 21 }],
+          message: "Your token has not been granted the required scopes to execute this query. The 'name' field requires one of the following scopes: ['repo'], but your token has only been granted the: ['public_repo'] scopes. Please modify your token's scopes at: https://github.com/settings/tokens." },
+      ],
+    }
+    const { chain } = probeChain({
+      stackView: { status: 1, stderr: "no current stack" },
+      graphql: { status: 1, stdout: nonStackScopesBody },
+    })
+    expect(chain.manager_status).toBe("probe-error")
+    expect(chain.manager_status).not.toBe("absent")
+  })
+
   test("colliding check keys are disambiguated (both failing checks surface, neither shadows)", () => {
     const collide = {
       ...FAILING,

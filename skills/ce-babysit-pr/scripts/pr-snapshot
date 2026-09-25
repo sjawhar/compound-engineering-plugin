@@ -535,6 +535,62 @@ def _stack_schema_unavailable(stderr):
     return False
 
 
+def _stack_selection_lines(query):
+    """Line numbers (1-indexed, matching gh's GraphQL error `locations`) whose field belongs to
+    `query`'s stackEntry/stack selection set. Computed generically by tracking brace nesting and
+    the field name that opened each level -- never a fixed list of field names, so it keeps
+    working if the query gains or loses fields."""
+    token_re = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|[{}()]")
+    depth_stack = []  # field name (or None) that opened each currently-open '{' level
+    paren_depth = 0
+    last_ident = None
+    stack_lines = set()
+    for lineno, line in enumerate(query.splitlines(), start=1):
+        for tok in token_re.finditer(line):
+            t = tok.group()
+            if t == "(":
+                paren_depth += 1
+            elif t == ")":
+                paren_depth = max(0, paren_depth - 1)
+            elif t == "{":
+                depth_stack.append(last_ident if paren_depth == 0 else None)
+                last_ident = None
+            elif t == "}":
+                if depth_stack:
+                    depth_stack.pop()
+            elif paren_depth == 0:
+                last_ident = t
+            if any(name in ("stack", "stackEntry") for name in depth_stack):
+                stack_lines.add(lineno)
+    return stack_lines
+
+
+def _stack_fields_unreadable(stdout, query):
+    """True when gh's structured GraphQL response (its JSON `errors` body, not the human-readable
+    stderr restatement) refuses every requested field with INSUFFICIENT_SCOPES, and each refusal's
+    location falls inside `query`'s stackEntry/stack selection: the stack fields are unreadable to
+    this identity (a token scoped below 'repo', such as a public_repo-only upstream fallback
+    token), distinct from a scope refusal on some other field, which stays a probe error."""
+    try:
+        parsed = json.loads(stdout or "{}")
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return False
+    errors = parsed.get("errors") if isinstance(parsed, dict) else None
+    if not errors:
+        return False
+    stack_lines = _stack_selection_lines(query)
+    for error in errors:
+        if not isinstance(error, dict) or error.get("type") != "INSUFFICIENT_SCOPES":
+            return False
+        locations = error.get("locations")
+        if not locations:
+            return False
+        for loc in locations:
+            if not isinstance(loc, dict) or loc.get("line") not in stack_lines:
+                return False
+    return True
+
+
 def _fetch_default_branch(owner, name, host=None):
     """Read the default branch without relying on private-preview GraphQL fields."""
     result = _run(["gh", "api", *_host_args(host), f"repos/{owner}/{name}",
@@ -677,7 +733,7 @@ query($owner:String!,$repo:String!,$pr:Int!){
             "-F", f"pr={pr}", "-f", f"query={query}"]
     r = _run(args)
     if r.returncode != 0:
-        if _stack_schema_unavailable(r.stderr):
+        if _stack_schema_unavailable(r.stderr) or _stack_fields_unreadable(r.stdout, query):
             default_branch = _fetch_default_branch(owner, name, host)
             if default_branch:
                 return MANAGER_ABSENT, None, default_branch
