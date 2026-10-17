@@ -19,6 +19,18 @@ Document a problem that is solved, verified working, and non-trivial. These are 
 
 `ce-compound` is not a `CONCEPTS.md` bootstrap tool — it seeds the learning's own area as a side effect, never the whole repo. Send a standalone request to create or bootstrap that file to `ce-compound-refresh`, then exit.
 
+## Destination override
+
+When the project's active instructions and conventions already in your context name a
+destination for end-of-task learnings other than this repository's files, deliver the one
+learning there, exactly as those instructions say, and write nothing under `<root>/`: skip
+every phase below, including vocabulary capture and the discoverability check, and end with
+`Documentation skipped (learning delivered to the destination the active instructions name)`.
+The override holds in every mode and depth. When delivery to that destination fails, report
+the failure in the same terminal line and still write nothing — the instructions own the
+fallback, not this skill.
+
+
 ## Mode Detection
 
 ```bash
